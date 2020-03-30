@@ -15,7 +15,6 @@ namespace TestRabbitClient.Channel
     public class RabbitMqChannel : IChannel
     {
         private readonly IConnectionFactoryWrapper _factory;
-        private readonly ConcurrentDictionary<PublishStatus, int> _results;
 
         private const string MqExchangeName = "TestExchange";
 
@@ -25,10 +24,9 @@ namespace TestRabbitClient.Channel
         /// <param name="factory">Connection factory wrapper</param>
         /// <param name="configuration">Configuration instance</param>
         /// <param name="logger">Logger instance</param>
-        public RabbitMqChannel(IConnectionFactoryWrapper factory, ConcurrentDictionary<PublishStatus, int> results)
+        public RabbitMqChannel(IConnectionFactoryWrapper factory)
         {
             _factory = factory;
-            _results = results;
 
 
             using (var connection = _factory.CreateConnection())
@@ -49,13 +47,12 @@ namespace TestRabbitClient.Channel
                 {
                     Publish(message);
                 }
-                catch (Exception)
+                catch (Exception e)
                 {
-                    _results.AddOrUpdate(PublishStatus.Exception, 0, (k, v) => v+1);
+                    Console.Error.WriteLine("Error occurred : {0}", e.ToString());
                     return PublishStatus.Exception;
                 }
 
-                _results.AddOrUpdate(PublishStatus.Success, 0, (k, v) => v+1);
                 return PublishStatus.Success;
             }
         }
