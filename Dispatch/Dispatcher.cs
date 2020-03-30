@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 namespace TestRabbitClient.Dispatch
 {
     /// <summary>
-    /// Implementation of <see cref="IDispatcher"/> which publishes <see cref="NotarizedEvent"/>-s to registered <see cref="IChannel"/>-s.
+    /// Implementation of <see cref="IDispatcher"/> which publishes messages to registered <see cref="IChannel"/>-s.
     /// </summary>
     public class Dispatcher : IDispatcher
     {

@@ -6,7 +6,7 @@ namespace TestRabbitClient.Dispatch
     public enum DispatchStatus
     {
         /// <summary>
-        /// <see cref="NotarizedEvent"/> dispatched successfully.
+        /// message dispatched successfully.
         /// </summary>
         Success,
 

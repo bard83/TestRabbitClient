@@ -6,7 +6,7 @@ namespace TestRabbitClient.Dispatch
     public enum PublishStatus
     {
         /// <summary>
-        /// <see cref="NotarizedEvent"/> published successfully.
+        /// message published successfully.
         /// </summary>
         Success,
 
