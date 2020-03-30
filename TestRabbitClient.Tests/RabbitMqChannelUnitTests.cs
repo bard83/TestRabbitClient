@@ -48,9 +48,8 @@ namespace TestRabbitClient.Tests
             var barrier = new Barrier(2);
             var rabbitFactoryWrapper1 = new RbConnectionFactoryWrapper();
             var rabbitFactoryWrapper2 = new RbConnectionFactoryWrapper();
-            var results = new ConcurrentDictionary<PublishStatus, int>();
-            var rbChannel1 = new RabbitMqChannel(rabbitFactoryWrapper1, results);
-            var rbChannel2 = new RabbitMqChannel(rabbitFactoryWrapper2, results);
+            var rbChannel1 = new RabbitMqChannel(rabbitFactoryWrapper1);
+            var rbChannel2 = new RabbitMqChannel(rabbitFactoryWrapper2);
             var barrierChannel1 = new BarrieredMqChannel(barrier, rbChannel1);
             var barrierChannel2 = new BarrieredMqChannel(barrier, rbChannel2);
 
@@ -61,7 +60,8 @@ namespace TestRabbitClient.Tests
             await Task.WhenAll(new Task[] { t1, t2 }).ConfigureAwait(false);
 
             // Assert
-            results[PublishStatus.Success].Should().Be(2);
+            t1.Result.Should().Be(PublishStatus.Success);
+            t2.Result.Should().Be(PublishStatus.Success);
         }
 
         [TestCaseSource(nameof(numberOfMessages))]
@@ -71,8 +71,7 @@ namespace TestRabbitClient.Tests
             var barrier = new Barrier(numberOfMessages);
             var taskList = new List<Task<PublishStatus>>();
             var rabbitFactoryWrapper = new RbConnectionFactoryWrapper();
-            var results = new ConcurrentDictionary<PublishStatus, int>();
-            var rbChannel = new RabbitMqChannel(rabbitFactoryWrapper, results);
+            var rbChannel = new RabbitMqChannel(rabbitFactoryWrapper);
 
             for (int i = 0; i < numberOfMessages; i++)
             {
@@ -85,7 +84,7 @@ namespace TestRabbitClient.Tests
             await Task.WhenAll(taskList).ConfigureAwait(false);
 
             // Assert
-            results[PublishStatus.Success].Should().Be(numberOfMessages);
+            taskList.Where(t => t.Result == PublishStatus.Success).Count().Should().Be(numberOfMessages);
         }
     }
 }
