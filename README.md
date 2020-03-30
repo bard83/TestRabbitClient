@@ -1,0 +1,2 @@
+# TestRabbitClient
+ConcurrentTest for RabbitMQClient
