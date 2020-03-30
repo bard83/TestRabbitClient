@@ -1,12 +1,13 @@
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using NUnit.Framework;
+using RabbitMQ.Client;
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using TestRabbitClient.Channel;
 using TestRabbitClient.Dispatch;
 
 namespace TestRabbitClient.Tests
@@ -19,24 +20,109 @@ namespace TestRabbitClient.Tests
             100,
         };
 
-        private class BarrieredMqChannel : IChannel
+        private class MqChannel : IChannel
         {
-            private readonly Barrier _barrier;
-            private readonly IChannel _channel;
+            private readonly ConnectionFactory _factory;
+            private readonly IConfiguration _configuration;
 
-            public BarrieredMqChannel(Barrier barrier, IChannel mqChannel)
+            private const string MqExchangeName = "TestExchange";
+            private readonly IConnection _connection;
+
+            public MqChannel()
             {
-                _barrier = barrier;
-                _channel = mqChannel;
+                _configuration = new ConfigurationBuilder()
+                    .AddEnvironmentVariables("RB_")
+                    .Build();
+                _factory = new ConnectionFactory
+                {
+                    UserName = "rabbitmq",
+                    Password = "rabbitmq",
+                    HostName = _configuration.GetValue<string>("MQ_SERVER"),
+                    Port = 5672,
+                    VirtualHost = "/",
+                };
+
+
+                _connection = _factory.CreateConnection();
+                using (var channel = _connection.CreateModel())
+                {
+                    channel.ExchangeDeclare(MqExchangeName, ExchangeType.Topic, true);
+                }
             }
 
-            public Task<PublishStatus> PublishAsync(string ne)
+            public Task<PublishStatus> PublishAsync(string message)
             {
                 return Task.Run(Impl);
-                Task<PublishStatus> Impl()
+                PublishStatus Impl()
+                {
+                    try
+                    {
+                        Publish(message);
+                    }
+                    catch (Exception e)
+                    {
+                        Console.Error.WriteLine("Error occurred : {0}", e.ToString());
+                        return PublishStatus.Exception;
+                    }
+
+                    return PublishStatus.Success;
+                }
+            }
+
+            private void Publish(string message)
+            {
+                using (var channel = _connection.CreateModel())
+                {
+                    channel.ConfirmSelect();
+
+                    byte[] byteMessage = Encoding.UTF8.GetBytes(message);
+
+                    string routingKey = "domain.test.1";
+                    channel.BasicPublish(MqExchangeName, routingKey, null, byteMessage);
+
+                    bool isConfirmed = channel.WaitForConfirms(new TimeSpan(0, 0, 5), out bool timedOut);
+                    if (!isConfirmed)
+                    {
+                        throw new InvalidOperationException("Message didn't confirm");
+                    }
+
+                    if (timedOut)
+                    {
+                        throw new InvalidOperationException("Message ran time out");
+                    }
+                }
+            }
+        }
+
+        private class BarrierDispatcher : IDispatcher
+        {
+            private readonly Barrier _barrier;
+            private readonly IEnumerable<IChannel> _eventHandlers;
+
+            public BarrierDispatcher(Barrier barrier, IEnumerable<IChannel> eventHandlers)
+            {
+                _barrier = barrier;
+                _eventHandlers = eventHandlers;
+            }
+
+            public Task<DispatchStatus> DispatchAsync(string message)
+            {
+                return Task.Run(Impl);
+                async Task<DispatchStatus> Impl()
                 {
                     _barrier.SignalAndWait();
-                    return _channel.PublishAsync(ne);
+                    foreach (var handler in _eventHandlers)
+                    {
+                        var res = await handler.PublishAsync(message).ConfigureAwait(false);
+                        if (res != PublishStatus.Success)
+                        {
+                            // We do not report these errors to the users, the dispatch process itself
+                            // is supposed to be decoupled from other operations.
+                            Console.Error.WriteLine("Handler had error: {0}", res);
+                        }
+                    }
+
+                    return DispatchStatus.Success;
                 }
             }
         }
@@ -46,12 +132,8 @@ namespace TestRabbitClient.Tests
         {
             // Arrange
             var barrier = new Barrier(2);
-            var rabbitFactoryWrapper1 = new RbConnectionFactoryWrapper();
-            var rabbitFactoryWrapper2 = new RbConnectionFactoryWrapper();
-            var rbChannel1 = new RabbitMqChannel(rabbitFactoryWrapper1);
-            var rbChannel2 = new RabbitMqChannel(rabbitFactoryWrapper2);
-            var barrierChannel1 = new BarrieredMqChannel(barrier, rbChannel1);
-            var barrierChannel2 = new BarrieredMqChannel(barrier, rbChannel2);
+            var barrierChannel1 = new MqChannel();
+            var barrierChannel2 = new MqChannel();
 
             // Act
             var t1 = barrierChannel1.PublishAsync($"My message {DateTime.Now.ToString("o")}");
@@ -70,21 +152,45 @@ namespace TestRabbitClient.Tests
             // Arrange
             var barrier = new Barrier(numberOfMessages);
             var taskList = new List<Task<PublishStatus>>();
-            var rabbitFactoryWrapper = new RbConnectionFactoryWrapper();
-            var rbChannel = new RabbitMqChannel(rabbitFactoryWrapper);
+            var mqChannel = new MqChannel();
 
+            // Act
             for (int i = 0; i < numberOfMessages; i++)
             {
-                var barrierChannel = new BarrieredMqChannel(barrier, rbChannel);
-
-                // Act
-                taskList.Add(rbChannel.PublishAsync($"My message {DateTime.Now.ToString("o")}"));
+                taskList.Add(mqChannel.PublishAsync($"My message {DateTime.Now.ToString("o")}"));
             }
 
             await Task.WhenAll(taskList).ConfigureAwait(false);
 
             // Assert
             taskList.Where(t => t.Result == PublishStatus.Success).Count().Should().Be(numberOfMessages);
+        }
+
+        [TestCaseSource(nameof(numberOfMessages))]
+        public async Task DispatchAsync_WhenMultiConcurrent_ReturnsOk(int size)
+        {
+            // Arrange
+            var barrier = new Barrier(size);
+            var mqChannel = new MqChannel();
+            var channels = new List<IChannel>
+            {
+                mqChannel,
+            };
+            var dispatcher = new BarrierDispatcher(barrier, channels);
+
+            // Act
+            var tasks = new List<Task<DispatchStatus>>();
+            for (int i = 0; i < size; i++)
+            {
+                var t = dispatcher.DispatchAsync($"My message {DateTime.Now.ToString("o")}");
+                tasks.Add(t);
+            }
+
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+
+            // Assert
+            var contentTask = tasks.Where(t => t.Result != DispatchStatus.Success).ToList();
+            contentTask.Should().BeEmpty();
         }
     }
 }

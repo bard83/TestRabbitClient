@@ -6,7 +6,6 @@ COPY TestRabbitClient.csproj .
 RUN dotnet restore .
 
 # copy everything else and build app
-COPY Channel/ ./Channel
 COPY Dispatch/ ./Dispatch
 COPY TestRabbitClient.Tests/ ./TestRabbitClient.Tests
 
