@@ -1,0 +1,25 @@
+version: '2.4'
+
+services:
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.Tests
+    environment:
+      RB_MQ_SERVER: mq
+    depends_on:
+      - mq
+  mq:
+    image: rabbitmq:3.8-management
+    ports:
+    # The standard AMQP protocol port
+    - '5672:5672'
+    # HTTP management UI
+    - '15672:15672'
+    env_file:
+      - rabbitmq.env
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics check_local_alarms"]
+      interval: 1s
+      timeout: 5s
+      retries: 5
