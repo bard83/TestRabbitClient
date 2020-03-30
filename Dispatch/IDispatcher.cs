@@ -3,7 +3,7 @@ using System.Threading.Tasks;
 namespace TestRabbitClient.Dispatch
 {
     /// <summary>
-    /// Interface for dispatching <see cref="NotarizedEvent"/>-s.
+    /// Interface for dispatching messages.
     /// </summary>
     public interface IDispatcher
     {
